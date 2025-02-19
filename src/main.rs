@@ -14,7 +14,7 @@ use core::sync::atomic::AtomicBool;
 
 use std::env;
 use std::str;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 
 #[macro_use]
@@ -25,7 +25,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use git_cache::GitCache;
 use indexmap::IndexSet;
 use itertools::Itertools;
-use signal_hook::{consts::SIGINT, iterator::Signals};
+use signal_hook::{consts::SIGINT, flag::register_conditional_shutdown};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -132,18 +132,11 @@ fn main() {
     };
 }
 
-pub static IGNORE_SIGINT: AtomicBool = AtomicBool::new(false);
+pub static IGNORE_SIGINT: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
 fn try_main() -> Result<i32> {
-    let mut signals = Signals::new([SIGINT])?;
-
-    thread::spawn(move || {
-        for sig in signals.forever() {
-            if sig == SIGINT && !IGNORE_SIGINT.load(std::sync::atomic::Ordering::SeqCst) {
-                std::process::exit(130);
-            }
-        }
-    });
+    IGNORE_SIGINT.set(Arc::new(AtomicBool::new(false)));
+    register_conditional_shutdown(SIGINT, 130, IGNORE_SIGINT.get().unwrap().clone());
 
     clap_complete::env::CompleteEnv::with_factory(cli::clap).complete();
 
